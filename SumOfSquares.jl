@@ -11,8 +11,12 @@ Z(x) = x[1]^2
 dZdX(x) = 2*x[1]
 N = 1
 
-function f(dx, x, u, t)
-    dx[1] = A*Z(x) + B*u(x,t)
+@inline function f(x, u, t)
+    return A*Z(x) + B*u(x,t)
+end
+
+@inline function f(dx, x, u, t)
+    dx[1] = f(x, u, t)
 end
 
 # Solve ODE
@@ -33,13 +37,25 @@ Z0T = reshape(Z.(sol.u), (N, T))
 model = SOSModel(Mosek.Optimizer)
 @variable(model, P[1:N,1:N], Symmetric)
 @variable(model, Y0[1:T,1:N])
-@constraint(model, Z0T*Y0 .== P)
+@constraint(model, Z0T*(Y0) .== P)
 if size(P)[1] > 1
     @SDconstraint(model, P >= I)
 else
     @constraint(model, P[1,1] >= 1.0)
 end
+
+@variable(model, γ)
+@objective(model, Max, γ)
+
+@polyvar x[1:N]
+Q = -(dZdX(x)*X1T*(Y0)+transpose(dZdX(x)*X1T*Y0))
+if size(Q)[1] > 1
+    @SDconstraint(model, Q >= γ)
+else
+    @constraint(model, Q[1,1] >= γ)
+end
 optimize!(model)
 display(termination_status(model))
 display(value.(P))
 display(value.(Y0))
+display(objective_value(model))
