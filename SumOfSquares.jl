@@ -2,72 +2,104 @@ using SumOfSquares
 using DynamicPolynomials
 using MosekTools
 using DifferentialEquations
+using ODEInterface
 using LinearAlgebra
 
 # System Dynamics
-A = 1.0
-B = 1.0
-Z(x) = x[1]^2
-dZdX(x) = 2*x[1]
-N = 1
-O = 1
-ϵ = 1E-6
+A(x) = Matrix{Float64}(I(2))
+B(x) = [0.; 1.]
+Z(x) = [x[2]; x[1]^2]
+dZdX(x) = [0. 1.; 2x[1] 0.]
+C1(x) = [x[2] -x[1]; 0 -x[2]]
+C2(x) = [-1. x[1]]
+C1_dim = 2
+C2_dim = 1
+N = 2
+n_vars = 2
+O = 3
+ϵ = 1E-4
 
-@inline function f(x, u, t)
-    return A*Z(x) + B*u(x,t)
+@inline function xdot(x, u, t)
+    return A(x)*Z(x) + B(x)*u(x, t)
 end
 
-@inline function f(dx, x, u, t)
-    dx[1] = f(x, u, t)
+@inline function f!(dx, x, u, t)
+    dx .= A(x)*Z(x) + B(x)*u(x, t)
 end
 
 # Solve ODE
 Tmax = 1.0
-τ = 0.1
+τ = 0.25
+x0 = [0.5, 0.5]
 u(x,t) = -sin(t)
-prob = ODEProblem{true}(f, [0.5-rand()], [0.0, Tmax], u)
-sol = DifferentialEquations.solve(prob, Tsit5(), saveat=τ, dense=false, save_end=false, dtmin=1E-6)
+prob = ODEProblem(f!, x0, (0.0, Tmax), u)
+sol = DifferentialEquations.solve(prob, AutoTsit5(Rosenbrock23()), saveat=τ, dense=false, save_end=false, dtmin=1E-6)
 
-# Generate data from ODE solution
-T = length(sol.t)
-X0T = reshape(sol.u, (N, T))
-U01T = reshape(u.(sol.u, sol.t), (N, T))
-X1T = reshape(f.(sol.u, u, sol.t), (N, T))
-Z0T = reshape(Z.(sol.u), (N, T))
+times = sol.t
+states = hcat(sol.u...)
+# Generate data matrices from ODE solution
+T = length(times)
+X0T = states
+U01T = hcat([u(states[:, i], times[i]) for i=1:size(states, 2)]...)
+X1T = hcat([xdot(states[:, i], u, times[i]) for i=1:size(states, 2)]...)
+Z0T = hcat([Z(states[:, i]) for i=1:size(states, 2)]...)
 
 # Create a Sum of Squares JuMP model with the Mosek solver
 model = SOSModel(Mosek.Optimizer)
-@variable(model, P[1:N,1:N], Symmetric)
 @variable(model, Y0[1:T,1:N])
 
-@polyvar x[1:N]
+@polyvar x[1:n_vars]
 X = monomials(x, 0:O)
 @variable(model, Y1[1:T, 1:N], Poly(X))
 
-Y = Y0+Y1
 
-@constraint(model, Z0T*Y0 .== P)
 @constraint(model, Z0T*Y1 .== 0.0)
-if size(P)[1] > 1
-    @SDconstraint(model, P >= ϵ*I)
-else
-    @constraint(model, P[1,1] >= ϵ*1.0)
-end
 
-@variable(model, γ)
-@objective(model, Max, γ)
+# if size(Z0T*Y0, 1) > 1
+#     @SDconstraint(model, Z0T*Y0 >= ϵ*I)
+# else
+@SDconstraint(model, Z0T*Y0 >= ϵ*I)
+# end
 
-Q = -(dZdX(x)*X1T*Y+transpose(dZdX(x)*X1T*Y))
-if size(Q)[1] > 1
-    @SDconstraint(model, Q >= γ)
-else
-    @constraint(model, Q[1,1] >= γ)
-end
-@constraint(model, γ >= 0)
+
+I_tot = Matrix{Float64}(I(C1_dim + C2_dim))
+I1 = I_tot[:, 1:C1_dim]
+I2 = I_tot[:, C1_dim+1:C1_dim+C2_dim]
+
+ϵ2(y) = ϵ*y[1]^4 + ϵ*y[2]^4
+# Q = dZdX(x)*X1T*(Y0+Y1)+transpose(dZdX(x)*X1T*(Y0+Y1))
+Q_11 = dZdX(x)*X1T*(Y0+Y1)+transpose(dZdX(x)*X1T*(Y0+Y1)) + ϵ2(x)*I(N)
+Q_21 = ((I1*C1(x) + I2*C2(x))*Z0T + I2*U01T)*(Y0+Y1)
+Q_12 = transpose(Q_21)
+Q_22 = -I(size(Q_21, 1))*(1-ϵ2(x))
+Q_aug = Matrix([Q_11 Q_12; Q_21 Q_22])
+
+@polyvar v[1:size(Q_aug, 1)]
+
+@constraint(model, -transpose(v)*Q_aug*v >= 0)
+
+# @variable(model, W[1:size(Z0T*Y0, 1),1:size(Z0T*Y0, 1)])
+# trace_mat = Matrix([W I(size(W, 1)); I(size(W, 1)) Z0T*Y0])
+# @polyvar v2[1:size(trace_mat, 1)]
+# @constraint(model, transpose(v2)*trace_mat*v2 >= 0)
+#
+# @objective(model, Min, W[1, 1]+W[2, 2])
+
+
 optimize!(model)
 display(termination_status(model))
-display(value.(P))
-display(value.(Y))
 # display(objective_value(model))
 
-F = U01T*value.(Y)*inv(Z0T*value.(Y))
+F = U01T*value.(Y0+Y1)*inv(Z0T*value.(Y0))
+
+# solve ODE with new controller
+Tmax = 100.0
+τ = 0.1
+x0 = [0.5, 0.5]
+new_u(x, t) = [F[i](x...) for i=1:N]'*Z(x)
+prob2 = ODEProblem(f!, x0, (0.0, Tmax), new_u)
+sol2 = DifferentialEquations.solve(prob2, Tsit5(), saveat=τ, dense=false, save_end=false)
+
+times = sol2.t
+states = hcat(sol2.u...)
+plot(times, states')
