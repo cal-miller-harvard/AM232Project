@@ -45,3 +45,23 @@ class RNNController(nn.Module):
         # Called at the beginning of a simulation
         self.hidden = None
 
+
+class LinearController(nn.Module):
+    def __init__(self, dim_y, dim_u, dim_h=10, hidden=2, nonlinearity='relu'):
+        super(LinearController, self).__init__()
+        layers = [nn.Linear(dim_y, dim_h, bias=False).double(), nn.ReLU()]
+        for _ in range(hidden):
+            layers += [nn.Linear(dim_h, dim_h, bias=False).double(), nn.ReLU()]
+        layers += [nn.Linear(dim_h, dim_u).double()]
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, y):
+        return self.net(y)
+
+    def init_weights(self):
+        a, b = -0.2, 0.2
+        for name, param in self.named_parameters():
+              torch.nn.init.uniform_(param, a=a, b=b)
+
+    def reset(self):
+        pass
