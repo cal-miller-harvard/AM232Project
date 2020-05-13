@@ -2,8 +2,8 @@ using SumOfSquares
 using DynamicPolynomials
 using MosekTools
 using DifferentialEquations
-using ODEInterface
 using LinearAlgebra
+using Plots
 
 # System Dynamics
 A(x) = Matrix{Float64}(I(2))
@@ -28,15 +28,27 @@ end
 end
 
 # Solve ODE
-Tmax = 1.0
-τ = 0.25
+Tmax = 10
+τ = 1
 x0 = [0.5, 0.5]
 u(x,t) = -sin(t)
-prob = ODEProblem(f!, x0, (0.0, Tmax), u)
-sol = DifferentialEquations.solve(prob, AutoTsit5(Rosenbrock23()), saveat=τ, dense=false, save_end=false, dtmin=1E-6)
+times = [i for i in 0:τ:Tmax]
 
-times = sol.t
-states = hcat(sol.u...)
+
+function solve_discrete(x0, times, u)
+    states = zeros((length(x0), length(times)))
+    for (i, t) in enumerate(times)
+        if i == 1
+            states[:,i] .= x0
+        else
+            states[:,i] .= xdot(states[:,i-1], u, t)
+        end
+    end
+    return states
+end
+
+states = solve_discrete(x0, times, u)
+
 # Generate data matrices from ODE solution
 T = length(times)
 X0T = states
@@ -54,12 +66,7 @@ X = monomials(x, 0:O)
 
 
 @constraint(model, Z0T*Y1 .== 0.0)
-
-# if size(Z0T*Y0, 1) > 1
-#     @SDconstraint(model, Z0T*Y0 >= ϵ*I)
-# else
 @SDconstraint(model, Z0T*Y0 >= ϵ*I)
-# end
 
 
 I_tot = Matrix{Float64}(I(C1_dim + C2_dim))
@@ -67,7 +74,6 @@ I1 = I_tot[:, 1:C1_dim]
 I2 = I_tot[:, C1_dim+1:C1_dim+C2_dim]
 
 ϵ2(y) = ϵ*y[1]^4 + ϵ*y[2]^4
-# Q = dZdX(x)*X1T*(Y0+Y1)+transpose(dZdX(x)*X1T*(Y0+Y1))
 Q_11 = dZdX(x)*X1T*(Y0+Y1)+transpose(dZdX(x)*X1T*(Y0+Y1)) + ϵ2(x)*I(N)
 Q_21 = ((I1*C1(x) + I2*C2(x))*Z0T + I2*U01T)*(Y0+Y1)
 Q_12 = transpose(Q_21)
@@ -75,17 +81,7 @@ Q_22 = -I(size(Q_21, 1))*(1-ϵ2(x))
 Q_aug = Matrix([Q_11 Q_12; Q_21 Q_22])
 
 @polyvar v[1:size(Q_aug, 1)]
-
 @constraint(model, -transpose(v)*Q_aug*v >= 0)
-
-# @variable(model, W[1:size(Z0T*Y0, 1),1:size(Z0T*Y0, 1)])
-# trace_mat = Matrix([W I(size(W, 1)); I(size(W, 1)) Z0T*Y0])
-# @polyvar v2[1:size(trace_mat, 1)]
-# @constraint(model, transpose(v2)*trace_mat*v2 >= 0)
-#
-# @objective(model, Min, W[1, 1]+W[2, 2])
-
-
 optimize!(model)
 display(termination_status(model))
 # display(objective_value(model))
@@ -93,13 +89,7 @@ display(termination_status(model))
 F = U01T*value.(Y0+Y1)*inv(Z0T*value.(Y0))
 
 # solve ODE with new controller
-Tmax = 100.0
-τ = 0.1
 x0 = [0.5, 0.5]
 new_u(x, t) = [F[i](x...) for i=1:N]'*Z(x)
-prob2 = ODEProblem(f!, x0, (0.0, Tmax), new_u)
-sol2 = DifferentialEquations.solve(prob2, Tsit5(), saveat=τ, dense=false, save_end=false)
-
-times = sol2.t
-states = hcat(sol2.u...)
+states = solve_discrete(x0, times, new_u)
 plot(times, states')
