@@ -5,22 +5,23 @@ using JuMP
 using MosekTools
 
 function estimateAB(xt, ut, Z)
-    model = Model(optimizer_with_attributes(Mosek.Optimizer, "QUIET"=>true))
-    N = size(xt[1])[1]
-    Nz = size(Z(xt[1][:,1]))[1]
-    T = size(xt[1])[2]
+    d = size(xt[1])[1]
+    dZ = length(Z(xt[1][:,1]))
+    du = length(u(xt[1][:,1],0))
 
-    @variable(model, Atilde[1:N, 1:Nz])
-    @variable(model, Btilde[1:N, 1:size(ut[1])[1]])
-    obj = 0
-    for l in 1:N
-        for t in 1:T-1
-            obj += sum((Atilde*Z(xt[l][:, t]) + Btilde*ut[l][:, t] - xt[l][:, t+1]).^2)
+    Xt = zeros(M*(T-1), d)
+    Zt = zeros(M*(T-1), dZ+du)
+    for i in 1:M
+        Xt[(T-1)*(i-1)+1:(T-1)*i, :] .= transpose(xt[i][:,2:end])
+        for j in 1:T-1
+        Zt[(T-1)*(i-1)+j, 1:d] .= Z(xt[i][:,j])
+        Zt[(T-1)*(i-1)+j, d+1:end] .= ut[1][:,j]
         end
     end
-    @objective(model, Min, obj)
-    optimize!(model)
-    return (value.(Atilde), value.(Btilde))
+    Θ =  Zt\Xt
+    Ahat = transpose(Θ[1:d,:])
+    Bhat = transpose(Θ[d+1:end,:])
+    return (Ahat, Bhat)
 end
 
 function bootstrap(δ, M, Ahat, Bhat, σw, σu, xt, ut, Z)
@@ -42,20 +43,9 @@ function bootstrap(δ, M, Ahat, Bhat, σw, σu, xt, ut, Z)
                 xhat[l][:, t+1] .= Ahat * Z(xhat[l][:, t]) + Bhat * us[l][:, t] + rand(w)
             end
         end
-        model = Model(optimizer_with_attributes(Mosek.Optimizer, "QUIET"=>true))
-        @variable(model, Atilde[1:size(Ahat)[1], 1:size(Ahat)[2]])
-        @variable(model, Btilde[1:size(Bhat)[1], 1:size(Bhat)[2]])
-        obj = 0
-        for l in 1:N
-            for t in 1:T-1
-                obj += sum((Atilde*Z(xhat[l][:, t]) + Btilde*us[l][:, t] - xhat[l][:, t+1]).^2)
-            end
-        end
-        @objective(model, Min, obj)
-        optimize!(model)
-
-        ϵAs[i] = norm(Ahat - value.(Atilde))
-        ϵBs[i] = norm(Bhat - value.(Btilde))
+        Atilde, Btilde = estimateAB(xhat, us, Z)
+        ϵAs[i] = norm(Ahat - Atilde)
+        ϵBs[i] = norm(Bhat - Btilde)
     end
     return (quantile(ϵAs,[δ,1-δ]), quantile(ϵBs,[δ,1-δ]))
 end

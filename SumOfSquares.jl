@@ -97,9 +97,9 @@ plot(times, states')
 # Bootstrap
 
 δ = 0.1
-M = 50
-σw = 0.001
-σu = 0.001
+M = 100
+σw = 1E-1
+σu = 1E0
 dw = Distributions.MvNormal(length(x0), σw)
 w(x,t) = rand(dw)
 times = [i for i in 0:10]
@@ -111,7 +111,7 @@ ut = [Matrix{Float64}(undef, length(u(x0, 0)), T) for i in 1:M]
 for i in 1:M
     ut[i] .= randn(size(ut[i]))
     itr = Iterators.Stateful(ut[i])
-    xt[i] .= solve_discrete(randn(size(x0)), times, (x,t) -> popfirst!(itr), w)
+    xt[i] .= solve_discrete(zero(x0), times, (x,t) -> popfirst!(itr), w)
 end
 
 Ahat, Bhat = estimateAB(xt, ut, Z)
@@ -119,6 +119,11 @@ println("Ahat:")
 display(Ahat)
 println("Bhat:")
 display(Bhat)
+
+println("A error:")
+display(norm(Ahat - A(x0)))
+println("B error:")
+display(norm(Bhat - B(x0)))
 
 ϵA, ϵB = bootstrap(δ, M, Ahat, Bhat, σw, σu, xt, ut, Z)
 
