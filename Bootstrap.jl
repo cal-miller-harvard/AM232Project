@@ -25,8 +25,7 @@ end
 function bootstrap(δ, M, Ahat, Bhat, σw, σu, xt, ut, Z)
     ϵAs = zeros(M)
     ϵBs = zeros(M)
-    N = size(xt[1])[1]
-    Nz = size(Z(xt[1][:,1]))[1]
+    N = length(xt)
     T = size(xt[1])[2]
     xhat = deepcopy(xt)
 
@@ -34,7 +33,7 @@ function bootstrap(δ, M, Ahat, Bhat, σw, σu, xt, ut, Z)
     w = Distributions.MvNormal(size(xt[1])[1], σw)
 
     for i in 1:M
-        us = [rand(u, T) for i in 1:M]
+        us = [rand(u, T) for i in 1:N]
         for l in 1:N
             xhat[l][:, 1] .= xt[l][:,1]
             for t in 1:T-1

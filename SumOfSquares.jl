@@ -127,9 +127,10 @@ plot(times, states')
 # Bootstrap
 
 δ = 0.1
-M = 100
+M = 20
+Mbootstrap = 500
 σw = 1E-1
-σu = 1E-1
+σu = 2E-1
 dw = Distributions.MvNormal(length(x0), σw)
 w(x,t) = rand(dw)
 times = [i for i in 0:10]
@@ -155,7 +156,7 @@ display(norm(Ahat - A(x0)))
 println("B error:")
 display(norm(Bhat - B(x0)))
 
-ϵA, ϵB = bootstrap(δ, M, Ahat, Bhat, σw, σu, xt, ut, Z)
+ϵA, ϵB = bootstrap(δ, Mbootstrap, Ahat, Bhat, σw, σu, xt, ut, Z)
 
 println("ϵA:")
 display(ϵA)
