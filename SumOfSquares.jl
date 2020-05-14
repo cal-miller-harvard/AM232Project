@@ -99,7 +99,7 @@ plot(times, states')
 δ = 0.1
 M = 100
 σw = 1E-1
-σu = 1E0
+σu = 1E-1
 dw = Distributions.MvNormal(length(x0), σw)
 w(x,t) = rand(dw)
 times = [i for i in 0:10]
@@ -109,7 +109,7 @@ xt = [Matrix{Float64}(undef, length(x0), T) for i in 1:M]
 ut = [Matrix{Float64}(undef, length(u(x0, 0)), T) for i in 1:M]
 
 for i in 1:M
-    ut[i] .= randn(size(ut[i]))
+    ut[i] .= σu*randn(size(ut[i]))
     itr = Iterators.Stateful(ut[i])
     xt[i] .= solve_discrete(zero(x0), times, (x,t) -> popfirst!(itr), w)
 end
