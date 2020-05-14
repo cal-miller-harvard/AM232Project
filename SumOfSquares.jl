@@ -5,6 +5,8 @@ using DifferentialEquations
 using LinearAlgebra
 using Plots
 
+include("Bootstrap.jl")
+
 # System Dynamics
 A(x) = Matrix{Float64}(I(2))
 B(x) = [0.; 1.]
@@ -18,13 +20,10 @@ N = 2
 n_vars = 2
 O = 3
 ϵ = 1E-4
+w(x,t) = zero(x)
 
 @inline function xdot(x, u, t)
-    return A(x)*Z(x) + B(x)*u(x, t)
-end
-
-@inline function f!(dx, x, u, t)
-    dx .= A(x)*Z(x) + B(x)*u(x, t)
+    return A(x)*Z(x) + B(x)*u(x, t) + w(x,t)
 end
 
 # Solve ODE
@@ -92,4 +91,26 @@ F = U01T*value.(Y0+Y1)*inv(Z0T*value.(Y0))
 x0 = [0.5, 0.5]
 new_u(x, t) = [F[i](x...) for i=1:N]'*Z(x)
 states = solve_discrete(x0, times, new_u)
-plot(times, states')
+# plot(times, states')
+
+# Bootstrap
+
+δ = 0.1
+M = 50
+σw = 0.1
+σu = 0.1
+times = [i for i in 0:10]
+
+T = length(times)
+xt = [Matrix{Float64}(undef, length(x0), T) for i in 1:M]
+ut = [Matrix{Float64}(undef, length(u(x0, 0)), T) for i in 1:M]
+
+for i in 1:M
+    ut[i] .= randn(size(ut[i]))
+    itr = Iterators.Stateful(ut[i])
+    xt[i] .= solve_discrete(randn(size(x0)), times, (x,t) -> popfirst!(itr))
+end
+
+Ahat, Bhat = estimateAB(xt, ut)
+
+println(bootstrap(δ, M, Ahat, Bhat, σw, σu, xt, ut))
