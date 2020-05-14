@@ -22,7 +22,7 @@ O = 3
 ϵ = 1E-4
 w(x,t) = zero(x)
 
-@inline function xdot(x, u, t)
+@inline function xdot(x, u, t, w)
     return A(x)*Z(x) + B(x)*u(x, t) + w(x,t)
 end
 
@@ -34,25 +34,25 @@ u(x,t) = -sin(t)
 times = [i for i in 0:τ:Tmax]
 
 
-function solve_discrete(x0, times, u)
+function solve_discrete(x0, times, u, w)
     states = zeros((length(x0), length(times)))
     for (i, t) in enumerate(times)
         if i == 1
             states[:,i] .= x0
         else
-            states[:,i] .= xdot(states[:,i-1], u, t)
+            states[:,i] .= xdot(states[:,i-1], u, t, w)
         end
     end
     return states
 end
 
-states = solve_discrete(x0, times, u)
+states = solve_discrete(x0, times, u, w)
 
 # Generate data matrices from ODE solution
 T = length(times)
 X0T = states
 U01T = hcat([u(states[:, i], times[i]) for i=1:size(states, 2)]...)
-X1T = hcat([xdot(states[:, i], u, times[i]) for i=1:size(states, 2)]...)
+X1T = hcat([xdot(states[:, i], u, times[i], w) for i=1:size(states, 2)]...)
 Z0T = hcat([Z(states[:, i]) for i=1:size(states, 2)]...)
 
 # Create a Sum of Squares JuMP model with the Mosek solver
@@ -78,7 +78,7 @@ Q_21 = ((I1*C1(x) + I2*C2(x))*Z0T + I2*U01T)*(Y0+Y1)
 Q_12 = transpose(Q_21)
 Q_22 = -I(size(Q_21, 1))*(1-ϵ2(x))
 Q_aug = Matrix([Q_11 Q_12; Q_21 Q_22])
-
+#=
 @polyvar v[1:size(Q_aug, 1)]
 @constraint(model, -transpose(v)*Q_aug*v >= 0)
 optimize!(model)
@@ -91,14 +91,17 @@ F = U01T*value.(Y0+Y1)*inv(Z0T*value.(Y0))
 x0 = [0.5, 0.5]
 new_u(x, t) = [F[i](x...) for i=1:N]'*Z(x)
 states = solve_discrete(x0, times, new_u)
-# plot(times, states')
+plot(times, states')
+=#
 
 # Bootstrap
 
 δ = 0.1
 M = 50
-σw = 0.1
-σu = 0.1
+σw = 0.001
+σu = 0.001
+dw = Distributions.MvNormal(length(x0), σw)
+w(x,t) = rand(dw)
 times = [i for i in 0:10]
 
 T = length(times)
@@ -108,9 +111,18 @@ ut = [Matrix{Float64}(undef, length(u(x0, 0)), T) for i in 1:M]
 for i in 1:M
     ut[i] .= randn(size(ut[i]))
     itr = Iterators.Stateful(ut[i])
-    xt[i] .= solve_discrete(randn(size(x0)), times, (x,t) -> popfirst!(itr))
+    xt[i] .= solve_discrete(randn(size(x0)), times, (x,t) -> popfirst!(itr), w)
 end
 
-Ahat, Bhat = estimateAB(xt, ut)
+Ahat, Bhat = estimateAB(xt, ut, Z)
+println("Ahat:")
+display(Ahat)
+println("Bhat:")
+display(Bhat)
 
-println(bootstrap(δ, M, Ahat, Bhat, σw, σu, xt, ut))
+ϵA, ϵB = bootstrap(δ, M, Ahat, Bhat, σw, σu, xt, ut, Z)
+
+println("ϵA:")
+display(ϵA)
+println("ϵB:")
+display(ϵB)
