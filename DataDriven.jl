@@ -80,13 +80,15 @@ function make_controller(opt)
 
     @constraint(model, -transpose(v)*Q_aug*v >= 0)
 
-    ### COMMENT OUT THESE FIVE LINES TO REMOVE OPTIMAL CONTROL OBJECTIVE
-    # @variable(model, W[1:size(Z0T*Y0, 1),1:size(Z0T*Y0, 1)])
-    # trace_mat = Matrix([W I(size(W, 1)); I(size(W, 1)) Z0T*Y0])
-    # @polyvar v2[1:size(trace_mat, 1)]
-    # @constraint(model, transpose(v2)*trace_mat*v2 >= 0)
-    # @objective(model, Min, W[1, 1]+W[2, 2])
-    #####
+    if opt
+        ### COMMENT OUT THESE FIVE LINES TO REMOVE OPTIMAL CONTROL OBJECTIVE
+        @variable(model, W[1:size(Z0T*Y0, 1),1:size(Z0T*Y0, 1)])
+        trace_mat = Matrix([W I(size(W, 1)); I(size(W, 1)) Z0T*Y0])
+        @polyvar v2[1:size(trace_mat, 1)]
+        @constraint(model, transpose(v2)*trace_mat*v2 >= 0)
+        @objective(model, Min, W[1, 1]+W[2, 2])
+        #####
+    end
 
 
     optimize!(model)
@@ -97,7 +99,7 @@ function make_controller(opt)
 end
 
 Fstab = make_controller(false)
-Fopt = make_controller(false)
+Fopt = make_controller(true)
 
 # solve ODE with new stabilizing controller
 Tmax = 100.0
@@ -114,7 +116,7 @@ solopt = DifferentialEquations.solve(prob2, Tsit5(), saveat=τ, dense=false, sav
 
 times = solstab.t
 statesstab = hcat(solstab.u...)
-statesopt = hcat(solstab.u...)
+statesopt = hcat(solopt.u...)
 plt = plot(times, [norm(statesstab[:,i]) for i in 1:length(times)], xlabel="t", ylabel="||x(t)||_2", label="stabilizing")
-plot!(plot, times, [norm(statesopt[:,i]) for i in 1:length(times)], label="optimal")
+plot!(plt, times, [norm(statesopt[:,i]) for i in 1:length(times)], label="optimal")
 savefig("data_driven.pdf")
