@@ -27,19 +27,21 @@ def simulate(controller, env, N, noise=0):
     controller.reset()
     obs = env.reset()
 
-    for _ in range(N):
+    for i in range(N):
         u = controller(obs)
         # u, obs, and total loss blow up if the the below is uncommented
-        # u += (torch.rand(u.shape) * 2 - 1) * noise
+        u += (torch.rand(u.shape) * 2 - 1) * noise
         obs, reward, _, _ = env.step(u)
         rewards.append(reward)
 
     total_loss = - torch.stack(rewards)
-    # print(total_loss)
     return total_loss #.mean()
 
 
-def train_model(controller, env, optimizer, n_epochs, n_steps, noise=0, v=False):
+def train_model(controller, env, n_epochs, n_steps, lr, noise=0, v=False):
+
+    optimizer = torch.optim.Adam(controller.parameters(), lr=lr)
+
     losses = []
     for epoch in range(n_epochs):
         optimizer.zero_grad()
@@ -59,9 +61,9 @@ def train_model(controller, env, optimizer, n_epochs, n_steps, noise=0, v=False)
     return losses
 
 
-def eval_model(controller, env, n_epochs, n_steps):
+def eval_model(controller, env, n_epochs, n_steps, noise=0):
     losses = []
     for epoch in range(n_epochs):
-        loss = simulate(controller, env, n_steps)
+        loss = simulate(controller, env, n_steps, noise=noise).mean()
         losses.append(loss.detach().cpu().numpy().item())
     return losses

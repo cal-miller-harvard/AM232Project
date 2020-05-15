@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from torch.distributions.multivariate_normal import MultivariateNormal
 
 import gym
 from gym import spaces
@@ -22,9 +23,10 @@ def b2(x):
 class Nonlinear(gym.Env):
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, A, B, Z, C1, C2, batch_size=1):
+    def __init__(self, A, B, Z, C1, C2, W=None, batch_size=1):
         super(Nonlinear, self).__init__()
 
+        self.wt = MultivariateNormal(torch.tensor([0.]), W) if W is not None else None
         self.b = batch_size
         self.get_ts = lambda x: [v(x) for v in [A, B, Z, C1, C2]]
         self.x_shape = (batch_size, B(0).shape[-2])
@@ -35,8 +37,12 @@ class Nonlinear(gym.Env):
     def step(self, u):
         # Execute one time step within the environment
         A, B, Z, C1, C2 = self.get_ts(self.x)
-        self.x = bmv(A, Z) + bmv(B, u)
-        reward = - (b2(bmv(C1, Z)) + b2(bmv(C2, Z)))
+        noise = self.wt.sample([u.shape[0]]) if self.wt is not None else 0
+
+        self.x = bmv(A, Z) + bmv(B, u) + noise
+        z1 = bmv(C1, Z)
+        z2 = bmv(C2, Z) + u
+        reward = - (b2(z1) + b2(z2))
         return self.x, reward, False, {}
 
     def reset(self):
