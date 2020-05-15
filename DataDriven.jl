@@ -100,7 +100,7 @@ Fstab = make_controller(false)
 Fopt = make_controller(false)
 
 # solve ODE with new stabilizing controller
-Tmax = 100.0
+Tmax = 500.0
 τ = 0.1
 x0 = [0.5, 0.5]
 new_u(x, t) = [Fstab[i](x...) for i=1:N]'*Z(x)
@@ -112,9 +112,16 @@ new_u(x, t) = [Fopt[i](x...) for i=1:N]'*Z(x)
 prob2 = ODEProblem(f!, x0, (0.0, Tmax), new_u)
 solopt = DifferentialEquations.solve(prob2, Tsit5(), saveat=τ, dense=false, save_end=false)
 
+# solve ODE with no controller
+new_u(x, t) = 0,0
+prob2 = ODEProblem(f!, x0, (0.0, Tmax), new_u)
+solnone = DifferentialEquations.solve(prob2, Tsit5(), saveat=τ, dense=false, save_end=false)
+
 times = solstab.t
 statesstab = hcat(solstab.u...)
 statesopt = hcat(solstab.u...)
-plt = plot(times, [norm(statesstab[:,i]) for i in 1:length(times)], xlabel="t", ylabel="||x(t)||_2", label="stabilizing")
+statesnone = hcat(solnone.u...)
+plt = plot(times, [norm(statesstab[:,i]) for i in 1:length(times)], xlabel="t", ylabel="||x(t)||_2", label="stabilizing", ylims=(0,0.6))
 plot!(plot, times, [norm(statesopt[:,i]) for i in 1:length(times)], label="optimal")
+plot!(plot, times, [norm(solnone[:,i]) for i in 1:length(times)], label="optimal")
 savefig("data_driven.pdf")
