@@ -5,6 +5,8 @@ using DifferentialEquations
 using LinearAlgebra
 using Plots
 
+pyplot()
+
 include("Bootstrap.jl")
 
 # System Dynamics
@@ -23,7 +25,9 @@ O = 3
 w(x,t) = zero(x)
 
 @inline function xdot(x, u, t, w)
-    return A(x)*Z(x) + B(x)*u(x, t) + w(x,t)
+    nrows = length(x)
+    ncols = length(Z(x)) - nrows
+    return [A(x) zeros(nrows, ncols)]*Z(x) + B(x)*u(x, t) + w(x,t)
 end
 
 # Solve ODE
@@ -89,11 +93,11 @@ I2 = I_tot[:, C1_dim+1:C1_dim+C2_dim]
 # =======
 # ϵ2(y) = ϵ*y[1]^4 + ϵ*y[2]^4
 # >>>>>>> 2edf902927a0f72f984dae3ffb115f32eb92660d
-Q_11 = dZdX(x)*X1T*(Y0+Y1)+transpose(dZdX(x)*X1T*(Y0+Y1)) + ϵ2(x)*I(N)
-Q_21 = ((I1*C1(x) + I2*C2(x))*Z0T + I2*U01T)*(Y0+Y1)
-Q_12 = transpose(Q_21)
-Q_22 = -I(size(Q_21, 1))#*(1-ϵ2(x))
-Q_aug = Matrix([Q_11 Q_12; Q_21 Q_22])
+# Q_11 = dZdX(x)*X1T*(Y0+Y1)+transpose(dZdX(x)*X1T*(Y0+Y1)) + ϵ2(x)*I(N)
+# Q_21 = ((I1*C1(x) + I2*C2(x))*Z0T + I2*U01T)*(Y0+Y1)
+# Q_12 = transpose(Q_21)
+# Q_22 = -I(size(Q_21, 1))#*(1-ϵ2(x))
+# Q_aug = Matrix([Q_11 Q_12; Q_21 Q_22])
 #=
 @polyvar v[1:size(Q_aug, 1)]
 # <<<<<<< HEAD
@@ -127,37 +131,78 @@ plot(times, states')
 # Bootstrap
 
 δ = 0.1
-M = 100
+M = 20
+Mbootstrap = 1000
 σw = 1E-1
-σu = 1E0
+σu = 2E-1
 dw = Distributions.MvNormal(length(x0), σw)
 w(x,t) = rand(dw)
 times = [i for i in 0:10]
 
-T = length(times)
-xt = [Matrix{Float64}(undef, length(x0), T) for i in 1:M]
-ut = [Matrix{Float64}(undef, length(u(x0, 0)), T) for i in 1:M]
+function simAB(Z)
+    T = length(times)
+    xt = [Matrix{Float64}(undef, length(x0), T) for i in 1:M]
+    ut = [Matrix{Float64}(undef, length(u(x0, 0)), T) for i in 1:M]
 
-for i in 1:M
-    ut[i] .= randn(size(ut[i]))
-    itr = Iterators.Stateful(ut[i])
-    xt[i] .= solve_discrete(zero(x0), times, (x,t) -> popfirst!(itr), w)
+    for i in 1:M
+        ut[i] .= σu*randn(size(ut[i]))
+        itr = Iterators.Stateful(ut[i])
+        xt[i] .= solve_discrete(zero(x0), times, (x,t) -> popfirst!(itr), w)
+    end
+
+    Ahat, Bhat = estimateAB(xt, ut, Z)
+    return (xt, ut, Ahat, Bhat)
 end
 
-Ahat, Bhat = estimateAB(xt, ut, Z)
-println("Ahat:")
-display(Ahat)
-println("Bhat:")
-display(Bhat)
+xt, ut, Ahat, Bhat = simAB(Z)
+function output(Z)
+    nrows = length(x0)
+    ncols = length(Z(x0)) - nrows
+    Abig = [A(x0) zeros(nrows, ncols)]
+    println(ncols, " ", size(Abig),size(Ahat))
+    errA = norm(Ahat - Abig)
+    errB = norm(Bhat - B(x0))
 
-println("A error:")
-display(norm(Ahat - A(x0)))
-println("B error:")
-display(norm(Bhat - B(x0)))
+    println("Ahat:")
+    display(Ahat)
+    println("Bhat:")
+    display(Bhat)
 
-ϵA, ϵB = bootstrap(δ, M, Ahat, Bhat, σw, σu, xt, ut, Z)
+    println("A error: $errA")
+    println("B error: $errB")
 
-println("ϵA:")
-display(ϵA)
-println("ϵB:")
-display(ϵB)
+    ϵAs, ϵBs, ϵA, ϵB = bootstrap(δ, Mbootstrap, Ahat, Bhat, σw, σu, xt, ut, Z)
+
+    println("ϵA:")
+    display(ϵA)
+    println("ϵB:")
+    display(ϵB)
+
+    nerrs = 10
+    errAs = zeros(nerrs)
+    errBs = zeros(nerrs)
+    for i in 1:nerrs
+        xt, ut, Ahat, Bhat = simAB(Z)
+        errAs[i] = norm(Ahat - Abig)
+        errBs[i] = norm(Bhat - B(x0))
+    end
+
+    histA = histogram(ϵAs, legend=false, normed=true, xlabel="|ΔA|", ylabel="pdf")
+    vline!(histA, errAs)
+
+    histB = histogram(ϵBs, legend=false, normed=true, xlabel="|ΔB|", ylabel="pdf")
+    vline!(histB, errBs)
+
+    plt = plot(histA, histB, layout = (2,1))
+end
+
+output(Z)
+savefig("figures/bootstrap.pdf")
+
+
+Zhat(x) = [x[2]; x[1]^2; x[1]; 1; x[2]^2]
+xt, ut, Ahat, Bhat = simAB(Zhat)
+ϵAs, ϵBs, ϵA, ϵB = bootstrap(δ, Mbootstrap, Ahat, Bhat, σw, σu, xt, ut, Zhat)
+
+output(Zhat)
+savefig("figures/bootstrap_est_basis.pdf")

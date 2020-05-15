@@ -1,8 +1,6 @@
 using Distributions
 using LinearAlgebra
 using Statistics
-using JuMP
-using MosekTools
 
 function estimateAB(xt, ut, Z)
     d = size(xt[1])[1]
@@ -14,21 +12,20 @@ function estimateAB(xt, ut, Z)
     for i in 1:M
         Xt[(T-1)*(i-1)+1:(T-1)*i, :] .= transpose(xt[i][:,2:end])
         for j in 1:T-1
-        Zt[(T-1)*(i-1)+j, 1:d] .= Z(xt[i][:,j])
-        Zt[(T-1)*(i-1)+j, d+1:end] .= ut[1][:,j]
+            Zt[(T-1)*(i-1)+j, 1:dZ] .= Z(xt[i][:,j])
+            Zt[(T-1)*(i-1)+j, dZ+1:end] .= ut[i][:,j]
         end
     end
-    Θ =  Zt\Xt
-    Ahat = transpose(Θ[1:d,:])
-    Bhat = transpose(Θ[d+1:end,:])
+    Θ = pinv(Zt, rtol=sqrt(eps(Float64)))*Xt
+    Ahat = transpose(Θ[1:dZ,:])
+    Bhat = transpose(Θ[dZ+1:end,:])
     return (Ahat, Bhat)
 end
 
 function bootstrap(δ, M, Ahat, Bhat, σw, σu, xt, ut, Z)
     ϵAs = zeros(M)
     ϵBs = zeros(M)
-    N = size(xt[1])[1]
-    Nz = size(Z(xt[1][:,1]))[1]
+    N = length(xt)
     T = size(xt[1])[2]
     xhat = deepcopy(xt)
 
@@ -47,5 +44,5 @@ function bootstrap(δ, M, Ahat, Bhat, σw, σu, xt, ut, Z)
         ϵAs[i] = norm(Ahat - Atilde)
         ϵBs[i] = norm(Bhat - Btilde)
     end
-    return (quantile(ϵAs,[δ,1-δ]), quantile(ϵBs,[δ,1-δ]))
+    return (ϵAs, ϵBs, quantile(ϵAs,[δ,1-δ]), quantile(ϵBs,[δ,1-δ]))
 end
